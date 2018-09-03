@@ -28,6 +28,11 @@ module TreeAutomata
   , toSubterms
   , fromSubterms
   , determinize
+  , widen
+  , correspondenceSet
+  , findAncestor
+  , prlb
+  , depth
 
   -- Queries
   , produces
@@ -57,6 +62,8 @@ import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.Text (Text)
 import qualified Data.Text as Text
+
+import Debug.Trace
 
 type Nonterm = Text
 data Rhs a = Ctor a [Nonterm] | Eps Nonterm deriving (Eq, Ord)
@@ -310,6 +317,131 @@ determinize g | isEmpty g = g
    fromCtor :: Rhs a -> (a,[[Nonterm]])
    fromCtor (Ctor c ns) = (c,[ns])
    fromCtor _ = error "epsilon"
+
+widen :: Ord a => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
+widen g1 g2 = if g2 `subsetOf` g1 then g1 else widen' g1' (g1' `union` g2') where
+  -- TODO: might not be necessary, but better have it for now.
+  g1' = determinize (normalize (epsilonClosure g1))
+  g2' = determinize (normalize (epsilonClosure g2))
+
+widen' :: Ord a => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
+widen' g1 g2 = do
+  Grammar s ps <- g1
+  Grammar s' ps' <- g2
+  let correspondence = correspondenceSet (Grammar s ps) (Grammar s' ps')
+      topoClashes = topologicalClashes correspondence (Grammar s ps) (Grammar s' ps')
+      wideClashes = wideningClashes topoClashes (Grammar s ps) (Grammar s' ps')
+      arcs = arcReplacements wideClashes (Grammar s ps) (Grammar s' ps')
+  if Set.null arcs
+    then g2 -- TODO: replace nodes?
+    else do
+      let (n,n') = Set.elemAt 0 arcs
+      widen' g1 (return (replaceNonterm n n' (Grammar s' ps')))
+  -- where
+    -- go :: (Nonterm,Nonterm) 
+    -- go (n,n') seen ps ps' g1 g2 = [  | ((n, rhs), (n', rhs')) <- zip (Map.toAscList ps) (Map.toAscList ps'), (prlb n g1 /= prlb n' g2 || depth n g1 /= depth n' g2) && (n,n') `Set.notMember` seen]
+
+replaceNonterm :: Nonterm -> Nonterm -> Grammar a -> Grammar a
+replaceNonterm n n' (Grammar s ps) = if s == n then Grammar n' ps' else Grammar s ps' where
+  -- ps' :: ProdMap a
+  ps' = Map.fromList $ map (\(k,v) -> replace' k v n n') (Map.toList ps) -- Map.mapWithKey () ps
+  -- replace' :: Nonterm -> [Rhs a] -> Nonterm -> Nonterm -> (Nonterm,[Rhs a])
+  replace' k v n n' = if k == n then (n',map (replace n n') v) else (k,map (replace n n') v)
+  -- replace :: Nonterm -> Nonterm -> Rhs a -> Rhs a
+  replace n n' (Ctor c ts) = Ctor c (map (\m -> if m == n then n' else n) ts)
+  replace n n' (Eps e) = if e == n then Eps n' else Eps n
+
+arcReplacements :: Set (Nonterm,Nonterm) -> Grammar a -> Grammar a -> Set (Nonterm,Nonterm)
+arcReplacements wideClashes g1 g2 = Set.map (\(n,n') -> (n', fromJust $ findAncestor n' g2)) haveAncestors where -- TODO: depth anc <= depth n, L(n) <= L(anc)
+  haveAncestors :: Set (Nonterm,Nonterm)
+  haveAncestors = Set.filter (\(_,n') -> isJust $ findAncestor n' g2) wideClashes
+
+findAncestor :: Nonterm -> Grammar a -> Maybe Nonterm
+findAncestor n (Grammar s ps) = if s == n then Nothing
+  else trace ("Produces: " ++ show produces ++ "\nAncestors: " ++ show ancestors) Just ancestor where
+    produces = map (\n -> (n,nub (concat (map rhsNonterms (ps Map.! n))))) (filter ((/=) n) (Map.keys ps))
+    ancestors = map (\(m,_) -> (m, depth m (Grammar s ps))) (filter (\(n,rhs) -> not (null rhs) && n `notElem` rhs) produces)
+    -- Heuristic: the best ancestor is the one "closest" (depth-wise) to the current nonterminal n.
+    e = depth n (Grammar s ps)
+    (ancestor,_,_) = minimum $ map (\(n,d) -> (n,d,abs (e - d))) ancestors
+
+wideningClashes :: Ord a => Set (Nonterm,Nonterm) -> Grammar a -> Grammar a -> Set (Nonterm,Nonterm)
+wideningClashes topoClashes g1 g2 =
+  Set.filter (\(n,n') -> (depth n g1 == depth n' g2 && prlb n g1 /= prlb n' g2) || depth n g1 < depth n' g2) topoClashes -- TODO: n' /= Any
+
+topologicalClashes :: Ord a => Set (Nonterm,Nonterm) -> Grammar a -> Grammar a -> Set (Nonterm,Nonterm)
+topologicalClashes correspondence g1 g2 =
+  Set.filter (\(n,n') -> prlb n g1 /= prlb n' g2 || depth n g1 /= depth n' g2) correspondence
+
+correspondenceSet :: Ord a => Grammar a -> Grammar a -> Set (Nonterm,Nonterm)
+correspondenceSet (Grammar s ps) (Grammar s' ps') = execState (go (Set.singleton (s,s')) ps ps') (Set.singleton (s,s')) where
+  go :: Ord a => Set (Nonterm,Nonterm) -> ProdMap a -> ProdMap a -> State (Set (Nonterm,Nonterm)) ()
+  go worklist ps ps' = if Set.null worklist then return ()
+    else do
+      correspondence <- get
+      let (n,n') = Set.elemAt 0 worklist
+          producesN = nub (concat (map rhsNonterms (ps Map.! n)))
+          producesN' = nub (concat (map rhsNonterms (ps' Map.! n')))
+          produces = filter (\c -> c `Set.notMember` correspondence) (zip producesN producesN')
+          toAdd = filter (\(n,n') -> depth n (Grammar s ps) == depth n' (Grammar s' ps') && prlb n (Grammar s ps) == prlb n' (Grammar s' ps')) produces
+          worklist' = Set.union (Set.deleteAt 0 worklist) (Set.fromList toAdd Set.\\ correspondence)
+      put (Set.union (Set.fromList toAdd) correspondence)
+      go worklist' ps ps'
+
+  -- execState (go prods) p where
+  -- p = Set.fromList [ n | (n, rhss) <- Map.toList prods, producesConstant rhss]
+  -- filter :: [Rhs a] -> Set Nonterm -> Bool
+  -- filter rhss p = case rhss of
+  --   (Ctor _ args : rhss) -> if and (map (`Set.member` p) args) then True else filter rhss p
+  --   (Eps nonterm : rhss) -> if Set.member nonterm p then True else filter rhss p
+  --   [] -> False
+  -- go :: ProdMap a -> State (Set Nonterm) ()
+  -- go prods = do p <- get
+  --               let p' = Set.union p $ Set.fromList [ n | (n, rhss) <- Map.toList prods, filter rhss p ]
+  --               put p'
+  --               if p == p' then return () else go prods
+
+
+-- | The principal label set of a given nonterminal symbol is the set
+-- of constructor names that it can generate.
+prlb :: Ord a => Nonterm -> Grammar a -> Set a
+prlb n (Grammar _ prods) = Set.fromList [ c | Ctor c _ <- prods Map.! n ]
+
+-- | The depth of a nonterminal is the smallest amount of steps that
+-- it takes to reach it from the root symbol.
+depth :: Nonterm -> Grammar a -> Int
+depth n (Grammar s ps) | n == s = 0
+                       | otherwise = go Set.empty n (ps Map.! s) ps 1 where
+                           go :: Set Nonterm -> Nonterm -> [Rhs a] -> ProdMap a -> Int -> Int
+                           go seen n rhs ps d | n `elem` (nub (concat (map rhsNonterms rhs))) = d
+                                              | otherwise = let
+                                                  seen' = foldr (\n seen -> Set.insert n seen) seen (concat (map rhsNonterms rhs))
+                                                  depths = (map (\m -> go seen' n (ps Map.! m) ps (d+1)) (filter (\m -> m `Set.notMember` seen) (nub (concat (map rhsNonterms rhs)))))
+                                                  in if null depths then d else minimum depths
+
+--                           -- | List the names that occur in a right hand side.
+-- rhsNonterms :: Rhs a -> [Nonterm]
+-- rhsNonterms (Ctor _ ns) = ns
+-- rhsNonterms (Eps n) = [n]
+
+-- c :: Grammar a -> Grammar a -> Set ((Nonterm,Nonterm),
+-- c (Grammar s ps) (Grammar s' ps') = undefined
+
+
+-- ci = undefined
+-- cr = undefined
+-- replaceArc = undefined
+-- replaceNode = undefined
+
+-- widen' :: GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
+-- widen' g1 g2 = if not (Set.null arcReplacements)
+--   then widen' g1 (replaceArc g2 arcReplacements)
+--   else if not (Set.null nodeReplacements)
+--     then widen' g1 (replaceNode g2 nodeReplacements)
+--     else g2
+--   where
+--   arcReplacements = ci g1 g2
+--   nodeReplacements = cr g1 g2
 
 -- | Returns true iff the given grammar can construct the given constant.
 produces :: Ord a => GrammarBuilder a -> a -> Bool

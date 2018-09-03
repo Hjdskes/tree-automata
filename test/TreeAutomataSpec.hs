@@ -4,6 +4,7 @@ module TreeAutomataSpec(main, spec) where
 import           Control.Monad.State hiding (sequence)
 
 import qualified Data.Map as M
+import qualified Data.Set as S
 import           Data.Text (Text)
 
 import           TreeAutomata
@@ -277,6 +278,39 @@ spec = do
       det `shouldSatisfy` isDeterministic
       det `shouldBe` infinite
 
+  describe "Widening" $ do
+    it "should not widen if the LHS is an upper bound" $ do
+      widen pcf pcf_sub `shouldBe` pcf
+
+    it "should be an upper bound" $ do
+      let w = widen pcf_sub pcf
+      pcf `subsetOf` w `shouldBe` True
+      pcf_sub `subsetOf` w `shouldBe` True
+
+    it "should build a correspondence set" $ do
+      correspondenceSet (evalState pcf_sub 0) (evalState pcf 0) `shouldBe` S.fromList [("PSStart","PStart"), ("Type", "Type")]
+
+    it "should find ancestors" $ do
+      findAncestor "PStart" (evalState pcf 0) `shouldBe` Nothing
+      findAncestor "Exp" (evalState pcf 0) `shouldBe` Just "PStart"
+      findAncestor "String" (evalState pcf 0) `shouldBe` Just "PStart"
+      findAncestor "Type" (evalState pcf 0) `shouldBe` Just "PStart"
+
+    it "the principal label set" $ do
+      prlb "PStart" (evalState pcf 0) `shouldBe` S.empty
+      prlb "Exp" (evalState pcf 0) `shouldBe` S.fromList ["App", "Abs", "Zero", "Succ", "Pred", "Ifz"]
+      prlb "String" (evalState pcf 0) `shouldBe` S.fromList ["String"]
+      prlb "Type" (evalState pcf 0) `shouldBe` S.fromList ["Num", "Fun"]
+
+    it "depth should return the smallest depth of any nonterminal" $ do
+      depth "PStart" (evalState pcf 0) `shouldBe` 0
+      depth "Exp" (evalState pcf 0) `shouldBe` 1
+      depth "String" (evalState pcf 0) `shouldBe` 2
+      depth "Type" (evalState pcf 0) `shouldBe` 1
+
+    it "should work on the example from the paper" $ do
+      widen cons0 cons1 `shouldBe` cons
+
   where
     nondet = grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
                                       , ("A", [ Ctor "a" [] ])
@@ -326,6 +360,20 @@ spec = do
                                                , ("Type", [ Ctor "Num" []
                                                           , Ctor "Fun" ["Type","Type"]])
                                                , ("String", [ Ctor "String" [] ])]
+
+    cons0 :: GrammarBuilder Text
+    cons0 = grammar "T0" $ M.fromList [ ("T0", [ Ctor "nil" [], Ctor "cons" ["T1","T2"] ])
+                                      , ("T1", [ Ctor "any" [] ])
+                                      , ("T2", [ Ctor "nil" [] ])]
+    cons1 :: GrammarBuilder Text
+    cons1 = grammar "T3" $ M.fromList [ ("T3", [ Ctor "nil" [], Ctor "cons" ["T4","T5"] ])
+                                      , ("T4", [ Ctor "any" [] ])
+                                      , ("T5", [ Ctor "nil" [], Ctor "cons" ["T6","T7"] ])
+                                      , ("T6", [ Ctor "any" [] ])
+                                      , ("T7", [ Ctor "nil" [] ])]
+    cons :: GrammarBuilder Text
+    cons = grammar "Tr" $ M.fromList [ ("Tr", [ Ctor "nil" [], Ctor "cons" ["Tx", "Tr"] ])
+                                     , ("Tx", [ Ctor "any" [] ])]
 
     -- Because equality is implemented using inclusion, we cannot test
     -- these functions by using `shouldBe`, which uses the Eq type
