@@ -29,7 +29,11 @@ module TreeAutomata
   , fromSubterms
   , determinize
   , widen
+  , replaceNonterm
+  , topologicalClashes
+  , wideningClashes
   , correspondenceSet
+  , arcReplacements
   , bestAncestor
   , findAncestors
   , prlb
@@ -337,21 +341,23 @@ widen' g1 g2 = do
     then g2 -- TODO: replace nodes?
     else do
     -- TODO: find best arc replacement
-      let (n,n') = Set.elemAt 0 arcs
-      widen' g1 (return (replaceNonterm n n' g2'))
+      let (n,a) = Set.elemAt 0 arcs
+      widen' g1 (replaceNonterm n a g2)
 
-replaceNonterm :: Nonterm -> Nonterm -> Grammar a -> Grammar a
-replaceNonterm n n' (Grammar s ps) = if s == n then Grammar n' ps' else Grammar s ps' where
-  ps' = Map.fromList $ map (\(k,v) -> replace' k v n n') (Map.toList ps)
-  replace' k v n n' = if k == n then (n',map (replace n n') v) else (k,map (replace n n') v)
-  replace n n' (Ctor c ts) = Ctor c (map (\m -> if m == n then n' else n) ts)
-  replace n n' (Eps e) = if e == n then Eps n' else Eps n
+replaceNonterm :: Nonterm -> Nonterm -> GrammarBuilder a -> GrammarBuilder a
+replaceNonterm n a g = do
+  Grammar s ps <- g
+  let ps' = Map.map (map (replace n a)) (Map.delete n ps)
+      replace n a rhs = case rhs of
+        Ctor c ts -> Ctor c (map (\m -> if m == n then a else m) ts)
+        Eps e     -> if e == n then Eps a else Eps e
+  if s == n then grammar a ps' else grammar s ps'
 
 arcReplacements :: Ord a => Set (Nonterm,Nonterm) -> Grammar a -> Grammar a -> Set (Nonterm,Nonterm)
 arcReplacements wideClashes g1 g2 = Set.map (\(n,n',ancs) -> (n', case bestAncestor n n' ancs g1 g2 of
                                                                  Nothing -> n'
                                                                  Just a -> a)) haveAncestors where
-  haveAncestors = Set.filter (\(n,n',ancs) -> null ancs) ancestors
+  haveAncestors = Set.filter (\(n,n',ancs) -> not (null ancs)) ancestors
   ancestors = Set.map (\(n,n') -> (n,n',findAncestors n' g2)) wideClashes
 
 bestAncestor :: Ord a => Nonterm -> Nonterm -> [Nonterm] -> Grammar a -> Grammar a -> Maybe Nonterm
@@ -368,6 +374,7 @@ bestAncestor n n' ancs g1 g2 = let
      else bestAncestor n n' (delete a ancs) g1 g2
 
 overapproximates :: Ord a => Nonterm -> Nonterm -> ProdMap a -> Bool
+-- TODO: subsetOf already checks for equility, but better be sure for now.
 overapproximates n a ps = nontermGrammar `subsetOf` ancestorGrammar || nontermGrammar == ancestorGrammar where
   ancestorGrammar = grammar a ps
   nontermGrammar = grammar n ps
@@ -376,10 +383,10 @@ overapproximates n a ps = nontermGrammar `subsetOf` ancestorGrammar || nontermGr
 -- nonterminals that can produce the given nonterminal not including
 -- that nonterminal itself.
 findAncestors :: Nonterm -> Grammar a -> [Nonterm]
-findAncestors n g@(Grammar _ ps) = Set.toList $ findAncestors' n g $ Set.filter (\p -> p /= n && n `elem` rhsNonterms' (ps Map.! p)) (productive g) where
+findAncestors n g@(Grammar _ ps) = Set.toList $ findAncestors' n g $ Set.filter (\p -> p /= n && n `elem` children (ps Map.! p)) (productive g) where
   findAncestors' :: Nonterm -> Grammar a -> Set Nonterm -> Set Nonterm
   findAncestors' n g@(Grammar _ ps) ancs = if ancs == ancs'' then ancs else findAncestors' n g ancs'' where
-    ancs' = Set.filter (\p -> not (Set.null (ancs `Set.intersection` Set.fromList (rhsNonterms' (ps Map.! p))))) (productive g)
+    ancs' = Set.filter (\p -> not (Set.null (ancs `Set.intersection` Set.fromList (children (ps Map.! p))))) (productive g)
     ancs'' = Set.union ancs' ancs
 
 wideningClashes :: Ord a => Set (Nonterm,Nonterm) -> Grammar a -> Grammar a -> Set (Nonterm,Nonterm)
@@ -397,14 +404,15 @@ correspondenceSet g1@(Grammar s ps) g2@(Grammar s' ps') = execState (go (Set.sin
     else do
       correspondence <- get
       let (n,n') = Set.elemAt 0 worklist
+          worklist' = Set.deleteAt 0 worklist
+      if depth n g1 == depth n' g2 && prlb n g1 == prlb n' g2
+        then do
           -- TODO: this assumes the same order of right hand sides when zipping.
-          producesN = nub (concat (map rhsNonterms (ps Map.! n)))
-          producesN' = nub (concat (map rhsNonterms (ps' Map.! n')))
-          produces = filter (\c -> c `Set.notMember` correspondence) (zip producesN producesN')
-          toAdd = filter (\(n,n') -> depth n g1 == depth n' g2 && prlb n g1 == prlb n' g2) produces
-          worklist' = Set.union (Set.deleteAt 0 worklist) (Set.fromList toAdd Set.\\ correspondence)
-      put (Set.union (Set.fromList toAdd) correspondence)
-      go worklist' ps ps'
+          let toAdd = zip (children (ps Map.! n)) (children (ps' Map.! n'))
+              worklist'' = Set.union worklist' (Set.fromList toAdd Set.\\ correspondence)
+          put (Set.union (Set.fromList toAdd) correspondence)
+          go worklist'' ps ps'
+        else go worklist' ps ps'
 
 -- | The principal label set of a given nonterminal symbol is the set
 -- of constructor names that it can generate.
@@ -417,10 +425,10 @@ depth :: Nonterm -> Grammar a -> Int
 depth n (Grammar s ps) | n == s = 0
                        | otherwise = go Set.empty n (ps Map.! s) ps 1 where
   go :: Set Nonterm -> Nonterm -> [Rhs a] -> ProdMap a -> Int -> Int
-  go seen n rhs ps d | n `elem` (nub (concat (map rhsNonterms rhs))) = d
+  go seen n rhs ps d | n `elem` children rhs = d
                      | otherwise = let
-                         seen' = foldr Set.insert seen (concat (map rhsNonterms rhs))
-                         depths = (map (\m -> go seen' n (ps Map.! m) ps (d+1)) (filter (\m -> m `Set.notMember` seen) (nub (concat (map rhsNonterms rhs)))))
+                         seen' = foldr Set.insert seen (children rhs)
+                         depths = (map (\m -> go seen' n (ps Map.! m) ps (d+1)) (filter (\m -> m `Set.notMember` seen) (children rhs)))
                          in if null depths then d else minimum depths
 
 -- | Returns true iff the given grammar can construct the given constant.
@@ -571,8 +579,8 @@ rhsNonterms (Ctor _ ns) = ns
 rhsNonterms (Eps n) = [n]
 
 -- | List the names that occur in all right hand sides.
-rhsNonterms' :: [Rhs a] -> [Nonterm]
-rhsNonterms' = nub . concat . map rhsNonterms
+children :: [Rhs a] -> [Nonterm]
+children = nub . concat . map rhsNonterms
 
 -- | Returns a grammar where the start symbol points to the m-th
 -- subterm of the n-th production of the original start symbol.

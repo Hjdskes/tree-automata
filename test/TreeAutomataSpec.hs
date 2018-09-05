@@ -280,29 +280,74 @@ spec = do
 
   describe "Widening" $ do
     it "should build a correspondence set" $ do
-      correspondenceSet (evalState pcf_sub 0) (evalState pcf 0) `shouldBe` S.fromList [("PSStart","PStart"), ("Type", "Type")]
+      -- let cons0' = evalState cons0 0
+      --     cons1' = evalState cons1 0
+      --     cons01' = union cons0 cons1
+      -- correspondenceSet (evalState pcf_sub 0) (evalState pcf 0) `shouldBe` S.fromList [("PSStart","PStart"), ("Type", "Type")]
+      correspondenceSet (evalState cons0 0) (evalState cons1 0) `shouldBe` S.fromList [("T0","T3"),("T1","T4"),("T2","T5")]
+
+    it "should find a set of topological clashes" $ do
+      let cons0' = evalState cons0 0
+          cons1' = evalState cons1 0
+          corr = correspondenceSet cons0' cons1'
+      topologicalClashes corr cons0' cons1' `shouldBe` S.fromList [("T2","T5")]
+
+    it "should find a set of widening topological clashes" $ do
+      let cons0' = evalState cons0 0
+          cons1' = evalState cons1 0
+          corr = correspondenceSet cons0' cons1'
+          clashes = topologicalClashes corr cons0' cons1'
+      wideningClashes clashes cons0' cons1' `shouldBe` S.fromList [("T2","T5")]
 
     it "should find ancestors" $ do
-      findAncestors "PStart" (evalState pcf 0) `shouldBe` []
-      findAncestors "Exp" (evalState pcf 0) `shouldBe` ["PStart"]
-      findAncestors "String" (evalState pcf 0) `shouldBe` ["Exp","PStart"]
-      findAncestors "Type" (evalState pcf 0) `shouldBe` ["Exp","PStart"]
-      findAncestors "G" (evalState nondet' 0) `shouldBe` ["F", "H", "S"]
-      findAncestors "A" (evalState nondet' 0) `shouldBe` ["F", "G", "H", "S"]
+      findAncestors "T5" (evalState cons1 0) `shouldBe` ["T3"]
+      -- findAncestors "PStart" (evalState pcf 0) `shouldBe` []
+      -- findAncestors "Exp" (evalState pcf 0) `shouldBe` ["PStart"]
+      -- findAncestors "String" (evalState pcf 0) `shouldBe` ["Exp","PStart"]
+      -- findAncestors "Type" (evalState pcf 0) `shouldBe` ["Exp","PStart"]
+      -- findAncestors "G" (evalState nondet' 0) `shouldBe` ["F", "H", "S"]
+      -- findAncestors "A" (evalState nondet' 0) `shouldBe` ["F", "G", "H", "S"]
+      -- findAncestors "A" (evalState cons1 0) `shouldBe` ["F", "G", "H", "S"]
+      -- findAncestors "A" (evalState cons1 0) `shouldBe` ["F", "G", "H", "S"]
 
     it "should find the best ancestor" $ do
-      bestAncestor "PStart" "PStart" (findAncestors "PStart" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Nothing
-      bestAncestor "Exp" "Exp" (findAncestors "Exp" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Just "PStart"
-      bestAncestor "String" "String" (findAncestors "String" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Just "Exp"
-      bestAncestor "Type" "Type" (findAncestors "Type" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Just "Exp" -- TODO: this is because they are both children of PStart, but it cannot work this way?
-      -- bestAncestor "G" "G" (findAncestors "G" (evalState nondet' 0)) (evalState nondet' 0) (evalState nondet' 0) `shouldBe` Just "F" -- H?
-      bestAncestor "A" "A" (findAncestors "A" (evalState nondet' 0)) (evalState nondet' 0) (evalState nondet' 0) `shouldBe` Just "G"
+      let cons0' = evalState cons0 0
+          cons1' = evalState cons1 0
+          ancs = findAncestors "T5" cons1'
+      bestAncestor "T2" "T5" ancs cons0' cons1' `shouldBe` Just "T3"
+      -- bestAncestor "PStart" "PStart" (findAncestors "PStart" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Nothing
+      -- bestAncestor "Exp" "Exp" (findAncestors "Exp" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Just "PStart"
+      -- bestAncestor "String" "String" (findAncestors "String" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Just "Exp"
+      -- bestAncestor "Type" "Type" (findAncestors "Type" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Just "Exp" -- TODO: this is because they are both children of PStart, but it cannot work this way?
+      -- -- bestAncestor "G" "G" (findAncestors "G" (evalState nondet' 0)) (evalState nondet' 0) (evalState nondet' 0) `shouldBe` Just "F" -- H?
+      -- bestAncestor "A" "A" (findAncestors "A" (evalState nondet' 0)) (evalState nondet' 0) (evalState nondet' 0) `shouldBe` Just "G"
+
+    it "should find a set of arc replacements for the widening topological clashes" $ do
+      let cons0' = evalState cons0 0
+          cons1' = evalState cons1 0
+          corr = correspondenceSet cons0' cons1'
+          topoClashes = topologicalClashes corr cons0' cons1'
+          wideClashes = wideningClashes topoClashes cons0' cons1'
+      arcReplacements wideClashes cons0' cons1' `shouldBe` S.fromList [("T5","T3")]
+
+    it "should replace nonterminals with ancestors" $ do
+      let consr :: GrammarBuilder Text
+          consr = grammar "T3" $ M.fromList [ ("T3", [ Ctor "nil" [], Ctor "cons" ["T4","T3"] ])
+                                            , ("T4", [ Ctor "any" [] ])
+                                            , ("T6", [ Ctor "any" [] ])
+                                            , ("T7", [ Ctor "nil" [] ])]
+      replaceNonterm "T5" "T3" cons1 `shouldBeLiteral` consr
 
     it "the principal label set" $ do
       prlb "PStart" (evalState pcf 0) `shouldBe` S.empty
       prlb "Exp" (evalState pcf 0) `shouldBe` S.fromList ["App", "Abs", "Zero", "Succ", "Pred", "Ifz"]
       prlb "String" (evalState pcf 0) `shouldBe` S.fromList ["String"]
       prlb "Type" (evalState pcf 0) `shouldBe` S.fromList ["Num", "Fun"]
+      prlb "S" (evalState nondet' 0) `shouldBe` S.fromList []
+      prlb "F" (evalState nondet' 0) `shouldBe` S.fromList ["f"]
+      prlb "G" (evalState nondet' 0) `shouldBe` S.fromList ["g"]
+      prlb "H" (evalState nondet' 0) `shouldBe` S.fromList []
+      prlb "A" (evalState nondet' 0) `shouldBe` S.fromList ["a"]
 
     it "depth should return the smallest depth of any nonterminal" $ do
       depth "PStart" (evalState pcf 0) `shouldBe` 0
@@ -310,6 +355,7 @@ spec = do
       depth "String" (evalState pcf 0) `shouldBe` 2
       depth "Type" (evalState pcf 0) `shouldBe` 1
       depth "G" (evalState nondet' 0) `shouldBe` 2
+      depth "A" (evalState nondet' 0) `shouldBe` 3
 
     it "should work on the example from the paper" $ do
       widen cons0 cons1 `shouldBeLiteral` cons01
