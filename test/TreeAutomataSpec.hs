@@ -12,8 +12,6 @@ import           TreeAutomata
 import           Test.Hspec
 import           Test.HUnit
 
-import Debug.Trace
-
 main :: IO ()
 main = hspec spec
 
@@ -286,8 +284,11 @@ spec = do
           cons1' = evalState (epsilonClosure cons1) 0
           pcf_sub' = evalState (epsilonClosure pcf_sub) 0
           pcf' = evalState (epsilonClosure pcf) 0
+          arith0' = evalState (epsilonClosure arith0) 0
+          arith1' = evalState (epsilonClosure arith1) 0
       correspondenceSet cons0' cons1' `shouldBe` S.fromList [("T0","T3"),("T1","T4"),("T2","T5")]
       correspondenceSet pcf_sub' pcf' `shouldBe` S.fromList [("PSStart","PStart")]
+      correspondenceSet arith0' arith1' `shouldBe` S.fromList [("T0","Tn"),("Tx","T3"),("T1","T6"),("T2","T7"),("Tx","T3")]
 
     it "should find a set of topological clashes" $ do
       let cons0' = evalState (epsilonClosure cons0) 0
@@ -296,8 +297,12 @@ spec = do
           pcf_sub' = evalState (epsilonClosure pcf_sub) 0
           pcf' = evalState (epsilonClosure pcf) 0
           corr_pcf = correspondenceSet pcf_sub' pcf'
+          arith0' = evalState (epsilonClosure arith0) 0
+          arith1' = evalState (epsilonClosure arith1) 0
+          corr_arith = correspondenceSet arith0' arith1'
       topologicalClashes corr01 cons0' cons1' `shouldBe` S.fromList [("T2","T5")]
       topologicalClashes corr_pcf pcf_sub' pcf' `shouldBe` S.fromList [("PSStart","PStart")]
+      topologicalClashes corr_arith arith0' arith1' `shouldBe` S.fromList [("Tx","T3")]
 
     it "should find a set of widening topological clashes" $ do
       let cons0' = evalState (epsilonClosure cons0) 0
@@ -308,11 +313,17 @@ spec = do
           corr_pcf = correspondenceSet pcf_sub' pcf'
           clashes01 = topologicalClashes corr01 cons0' cons1'
           clashes_pcf = topologicalClashes corr_pcf pcf_sub' pcf'
+          arith0' = evalState (epsilonClosure arith0) 0
+          arith1' = evalState (epsilonClosure arith1) 0
+          corr_arith = correspondenceSet arith0' arith1'
+          clashes_arith = topologicalClashes corr_arith arith0' arith1'
       wideningClashes clashes01 cons0' cons1' `shouldBe` S.fromList [("T2","T5")]
       wideningClashes clashes_pcf pcf_sub' pcf' `shouldBe` S.fromList [("PSStart","PStart")]
+      wideningClashes clashes_arith arith0' arith1' `shouldBe` S.fromList [("Tx","T3")]
 
     it "should find ancestors" $ do
       findAncestors "T5" (evalState cons1 0) `shouldBe` ["T3"]
+      findAncestors "T3" (evalState arith1 0) `shouldBe` ["T6","T7","Tn"]
       findAncestors "PStart" (evalState pcf 0) `shouldBe` []
       findAncestors "Exp" (evalState pcf 0) `shouldBe` ["PStart"]
       findAncestors "String" (evalState pcf 0) `shouldBe` ["Exp","PStart"]
@@ -327,7 +338,11 @@ spec = do
           pcf_sub' = evalState (epsilonClosure pcf_sub) 0
           pcf' = evalState (epsilonClosure pcf) 0
           ancs_pcf = findAncestors "PStart" pcf'
+          arith0' = evalState (epsilonClosure arith0) 0
+          arith1' = evalState (epsilonClosure arith1) 0
+          ancs_arith = findAncestors "T3" arith1'
       bestAncestor "T2" "T5" ancs01 cons0' cons1' `shouldBe` Just "T3"
+      bestAncestor "Tx" "T3" ancs_arith arith0' arith1' `shouldBe` Just "Tn"
       bestAncestor "PSStart" "PStart" ancs_pcf pcf_sub' pcf' `shouldBe` Nothing
       bestAncestor "Exp" "Exp" (findAncestors "Exp" pcf') pcf' pcf' `shouldBe` Just "PStart"
       bestAncestor "String" "String" (findAncestors "String" pcf') pcf' pcf' `shouldBe` Nothing
@@ -344,8 +359,14 @@ spec = do
           topoClashes_pcf = topologicalClashes corr_pcf pcf_sub' pcf'
           wideClashes01 = wideningClashes topoClashes01 cons0' cons1'
           wideClashes_pcf = wideningClashes topoClashes_pcf pcf_sub' pcf'
+          arith0' = evalState (epsilonClosure arith0) 0
+          arith1' = evalState (epsilonClosure arith1) 0
+          corr_arith = correspondenceSet arith0' arith1'
+          topoClashes_arith = topologicalClashes corr_arith arith0' arith1'
+          wideClashes_arith = wideningClashes topoClashes_arith arith0' arith1'
       arcReplacements wideClashes01 cons0' cons1' `shouldBe` S.fromList [("T5","T3")]
       arcReplacements wideClashes_pcf pcf_sub' pcf' `shouldBe` S.fromList []
+      arcReplacements wideClashes_arith arith0' arith1' `shouldBe` S.fromList [("T3","Tn")]
 
     it "should replace nonterminals with ancestors" $ do
       let consr :: GrammarBuilder Text
@@ -379,18 +400,23 @@ spec = do
     it "should work on the example from the paper" $ do
       determinize (widen' cons0 cons1) `shouldBeLiteral` cons01
       determinize (widen' cons1 cons2) `shouldBeLiteral` cons12
+      determinize (widen' arith0 arith1) `shouldBeLiteral` arith01
 
     it "should not widen if the LHS is an upper bound" $ do
       widen cons0 cons1 `shouldBeLiteral` cons0
       widen pcf pcf_sub `shouldBeLiteral` pcf
+      widen arith0 arith1 `shouldBeLiteral` arith0
 
     it "should be an upper bound" $ do
       let w_cons = determinize (widen' cons0 cons1)
           w_pcf = widen pcf_sub pcf
+          w_arith = determinize (widen' arith0 arith1)
       determinize pcf `shouldSatisfy` (`subsetOf` w_pcf)
       determinize pcf_sub `shouldSatisfy` (`subsetOf` w_pcf)
       cons0 `shouldSatisfy` subsetOf w_cons
       cons1 `shouldSatisfy` subsetOf w_cons
+      arith0 `shouldSatisfy` subsetOf w_arith
+      arith1 `shouldSatisfy` subsetOf w_arith
 
   where
     nondet = grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
@@ -469,6 +495,24 @@ spec = do
                                         , ("Nt2", [ Ctor "nil" [], Ctor "cons" ["Nt3", "Nt2"] ])
                                         , ("Nt3", [ Ctor "any" [] ])]
 
+    arith0 :: GrammarBuilder Text
+    arith0 = grammar "T0" $ M.fromList [ ("T0", [ Ctor "zero" [], Ctor "Add" ["Tx", "T1"] ])
+                                       , ("Tx", [ Ctor "zero" [] ])
+                                       , ("T1", [ Ctor "one" [], Ctor "Mul" ["T1","T2"] ])
+                                       , ("T2", [ Ctor "cst" [], Ctor "par" ["Tx"], Ctor "var" [] ])]
+    arith1 :: GrammarBuilder Text
+    arith1 = grammar "Tn" $ M.fromList [ ("Tn", [ Ctor "zero" [], Ctor "Add" ["T3","T6"] ])
+                                       , ("T3", [ Ctor "zero" [], Ctor "Add" ["Ty","T4"] ])
+                                       , ("Ty", [ Ctor "Zero" [] ])
+                                       , ("T4", [ Ctor "one" [], Ctor "Mul" ["T4","T5"] ])
+                                       , ("T5", [ Ctor "cst" [], Ctor "par" ["Ty"], Ctor "var" [] ])
+                                       , ("T6", [ Ctor "one" [], Ctor "Mul" ["T6","T7"] ])
+                                       , ("T7", [ Ctor "cst" [], Ctor "par" ["T3"], Ctor "var" [] ])]
+    arith01 :: GrammarBuilder Text
+    arith01 = grammar "Nt0" $ M.fromList [ ("Nt0", [ Ctor "zero" [], Ctor "Add" ["Nt0","Nt1"] ])
+                                         , ("Nt1", [ Ctor "one" [], Ctor "Mul" ["Nt1","Nt2"] ])
+                                         , ("Nt2", [ Ctor "var" [], Ctor "par" ["Nt0"], Ctor "cst" [] ])]
+
     -- Because equality is implemented using inclusion, we cannot test
     -- these functions by using `shouldBe`, which uses the Eq type
     -- class, which uses our equality. This dependency chain results
@@ -482,7 +526,8 @@ spec = do
     actual `shouldBeLiteral` expected =
       -- TODO: apparently the order of the right hand sides in the maps matters. For now, just make the right order in the test cases,
       -- but eventually we should implement a custom equality check that does not depend on order.
-        unless (start actual' == start expected' && productions actual' == productions expected')
+        unless (start actual' == start expected' &&
+                (productions actual') == (productions expected'))
           (assertFailure $ "Grammars are not literally equal.\nExpected:\n\n" ++ show expected ++ "\nbut got:\n\n" ++ show actual)
         where
           expected' = evalState expected 0
