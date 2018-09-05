@@ -326,6 +326,7 @@ determinize g | isEmpty g = g
 
 widen :: (Show a, Ord a) => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
 widen g1 g2 | g2 `subsetOf` g1 = g1
+            -- TODO: recurse?
             | otherwise = determinize (widen' g1 (union g1 g2))
 
 widen' :: (Show a, Ord a) => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a

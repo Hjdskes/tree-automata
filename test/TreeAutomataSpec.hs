@@ -12,6 +12,8 @@ import           TreeAutomata
 import           Test.Hspec
 import           Test.HUnit
 
+import Debug.Trace
+
 main :: IO ()
 main = hspec spec
 
@@ -312,13 +314,11 @@ spec = do
     it "should find ancestors" $ do
       findAncestors "T5" (evalState cons1 0) `shouldBe` ["T3"]
       findAncestors "PStart" (evalState pcf 0) `shouldBe` []
-      -- findAncestors "Exp" (evalState pcf 0) `shouldBe` ["PStart"]
-      -- findAncestors "String" (evalState pcf 0) `shouldBe` ["Exp","PStart"]
-      -- findAncestors "Type" (evalState pcf 0) `shouldBe` ["Exp","PStart"]
-      -- findAncestors "G" (evalState nondet' 0) `shouldBe` ["F", "H", "S"]
-      -- findAncestors "A" (evalState nondet' 0) `shouldBe` ["F", "G", "H", "S"]
-      -- findAncestors "A" (evalState cons1 0) `shouldBe` ["F", "G", "H", "S"]
-      -- findAncestors "A" (evalState cons1 0) `shouldBe` ["F", "G", "H", "S"]
+      findAncestors "Exp" (evalState pcf 0) `shouldBe` ["PStart"]
+      findAncestors "String" (evalState pcf 0) `shouldBe` ["Exp","PStart"]
+      findAncestors "Type" (evalState pcf 0) `shouldBe` ["Exp","PStart"]
+      findAncestors "G" (evalState nondet' 0) `shouldBe` ["F", "H", "S"]
+      findAncestors "A" (evalState nondet' 0) `shouldBe` ["F", "G", "H", "S"]
 
     it "should find the best ancestor" $ do
       let cons0' = evalState (epsilonClosure cons0) 0
@@ -329,12 +329,9 @@ spec = do
           ancs_pcf = findAncestors "PStart" pcf'
       bestAncestor "T2" "T5" ancs01 cons0' cons1' `shouldBe` Just "T3"
       bestAncestor "PSStart" "PStart" ancs_pcf pcf_sub' pcf' `shouldBe` Nothing
-      -- bestAncestor "PStart" "PStart" (findAncestors "PStart" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Nothing
-      -- bestAncestor "Exp" "Exp" (findAncestors "Exp" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Just "PStart"
-      -- bestAncestor "String" "String" (findAncestors "String" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Just "Exp"
-      -- bestAncestor "Type" "Type" (findAncestors "Type" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Just "Exp" -- TODO: this is because they are both children of PStart, but it cannot work this way?
-      -- -- bestAncestor "G" "G" (findAncestors "G" (evalState nondet' 0)) (evalState nondet' 0) (evalState nondet' 0) `shouldBe` Just "F" -- H?
-      -- bestAncestor "A" "A" (findAncestors "A" (evalState nondet' 0)) (evalState nondet' 0) (evalState nondet' 0) `shouldBe` Just "G"
+      bestAncestor "Exp" "Exp" (findAncestors "Exp" pcf') pcf' pcf' `shouldBe` Just "PStart"
+      bestAncestor "String" "String" (findAncestors "String" pcf') pcf' pcf' `shouldBe` Nothing
+      bestAncestor "Type" "Type" (findAncestors "Type" pcf') pcf' pcf' `shouldBe` Just "PStart"
 
     it "should find a set of arc replacements for the widening topological clashes" $ do
       let cons0' = evalState (epsilonClosure cons0) 0
@@ -383,13 +380,17 @@ spec = do
       determinize (widen' cons0 cons1) `shouldBeLiteral` cons01
       determinize (widen' cons1 cons2) `shouldBeLiteral` cons12
 
-    -- it "should not widen if the LHS is an upper bound" $ do
-    --   widen pcf pcf_sub `shouldBeLiteral` pcf
+    it "should not widen if the LHS is an upper bound" $ do
+      widen cons0 cons1 `shouldBeLiteral` cons0
+      widen pcf pcf_sub `shouldBeLiteral` pcf
 
-    -- it "should be an upper bound" $ do
-    --   let w = widen pcf_sub pcf
-    --   pcf `subsetOf` w `shouldBe` True
-    --   pcf_sub `subsetOf` w `shouldBe` True
+    it "should be an upper bound" $ do
+      let w_cons = determinize (widen' cons0 cons1)
+          w_pcf = widen pcf_sub pcf
+      determinize pcf `shouldSatisfy` (`subsetOf` w_pcf)
+      determinize pcf_sub `shouldSatisfy` (`subsetOf` w_pcf)
+      cons0 `shouldSatisfy` subsetOf w_cons
+      cons1 `shouldSatisfy` subsetOf w_cons
 
   where
     nondet = grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
