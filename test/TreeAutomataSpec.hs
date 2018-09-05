@@ -279,22 +279,24 @@ spec = do
       det `shouldBe` infinite
 
   describe "Widening" $ do
-    it "should not widen if the LHS is an upper bound" $ do
-      widen pcf pcf_sub `shouldBe` pcf
-
-    it "should be an upper bound" $ do
-      let w = widen pcf_sub pcf
-      pcf `subsetOf` w `shouldBe` True
-      pcf_sub `subsetOf` w `shouldBe` True
-
     it "should build a correspondence set" $ do
       correspondenceSet (evalState pcf_sub 0) (evalState pcf 0) `shouldBe` S.fromList [("PSStart","PStart"), ("Type", "Type")]
 
     it "should find ancestors" $ do
-      findAncestor "PStart" (evalState pcf 0) `shouldBe` Nothing
-      findAncestor "Exp" (evalState pcf 0) `shouldBe` Just "PStart"
-      findAncestor "String" (evalState pcf 0) `shouldBe` Just "PStart"
-      findAncestor "Type" (evalState pcf 0) `shouldBe` Just "PStart"
+      findAncestors "PStart" (evalState pcf 0) `shouldBe` []
+      findAncestors "Exp" (evalState pcf 0) `shouldBe` ["PStart"]
+      findAncestors "String" (evalState pcf 0) `shouldBe` ["Exp","PStart"]
+      findAncestors "Type" (evalState pcf 0) `shouldBe` ["Exp","PStart"]
+      findAncestors "G" (evalState nondet' 0) `shouldBe` ["F", "H", "S"]
+      findAncestors "A" (evalState nondet' 0) `shouldBe` ["F", "G", "H", "S"]
+
+    it "should find the best ancestor" $ do
+      bestAncestor "PStart" "PStart" (findAncestors "PStart" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Nothing
+      bestAncestor "Exp" "Exp" (findAncestors "Exp" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Just "PStart"
+      bestAncestor "String" "String" (findAncestors "String" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Just "Exp"
+      bestAncestor "Type" "Type" (findAncestors "Type" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Just "Exp" -- TODO: this is because they are both children of PStart, but it cannot work this way?
+      -- bestAncestor "G" "G" (findAncestors "G" (evalState nondet' 0)) (evalState nondet' 0) (evalState nondet' 0) `shouldBe` Just "F" -- H?
+      bestAncestor "A" "A" (findAncestors "A" (evalState nondet' 0)) (evalState nondet' 0) (evalState nondet' 0) `shouldBe` Just "G"
 
     it "the principal label set" $ do
       prlb "PStart" (evalState pcf 0) `shouldBe` S.empty
@@ -307,9 +309,19 @@ spec = do
       depth "Exp" (evalState pcf 0) `shouldBe` 1
       depth "String" (evalState pcf 0) `shouldBe` 2
       depth "Type" (evalState pcf 0) `shouldBe` 1
+      depth "G" (evalState nondet' 0) `shouldBe` 2
 
     it "should work on the example from the paper" $ do
-      widen cons0 cons1 `shouldBe` cons
+      widen cons0 cons1 `shouldBeLiteral` cons01
+      -- widen cons1 cons2 `shouldBeLiteral` cons12
+
+    -- it "should not widen if the LHS is an upper bound" $ do
+    --   widen pcf pcf_sub `shouldBeLiteral` pcf
+
+    -- it "should be an upper bound" $ do
+    --   let w = widen pcf_sub pcf
+    --   pcf `subsetOf` w `shouldBe` True
+    --   pcf_sub `subsetOf` w `shouldBe` True
 
   where
     nondet = grammar "S" $ M.fromList [ ("S", [ Eps "F" ])
@@ -371,9 +383,18 @@ spec = do
                                       , ("T5", [ Ctor "nil" [], Ctor "cons" ["T6","T7"] ])
                                       , ("T6", [ Ctor "any" [] ])
                                       , ("T7", [ Ctor "nil" [] ])]
-    cons :: GrammarBuilder Text
-    cons = grammar "Tr" $ M.fromList [ ("Tr", [ Ctor "nil" [], Ctor "cons" ["Tx", "Tr"] ])
-                                     , ("Tx", [ Ctor "any" [] ])]
+    -- cons2 :: GrammarBuilder Text
+    -- cons2 = grammar "T8" $ M.fromList [ ("T8", [ Ctor "nil" [], Ctor "cons" ["T9","T10"] ])
+    --                                   , ("T9", [ Ctor "any" [] ])
+    --                                   , ("T10", [ Ctor "nil" [], Ctor "cons" ["T11","T12"] ])
+    --                                   , ("T11", [ Ctor "any" [] ])
+    --                                   , ("T12", [ Ctor "nil" [] ])]
+    cons01 :: GrammarBuilder Text
+    cons01 = grammar "T0" $ M.fromList [ ("T0", [ Ctor "nil" [], Ctor "cons" ["T1", "T0"] ])
+                                       , ("T1", [ Ctor "any" [] ])]
+    -- cons12 :: GrammarBuilder Text
+    -- cons12 = grammar "Tr" $ M.fromList [ ("Tr", [ Ctor "nil" [], Ctor "cons" ["Tx", "Tr"] ])
+    --                                    , ("Tx", [ Ctor "any" [] ])]
 
     -- Because equality is implemented using inclusion, we cannot test
     -- these functions by using `shouldBe`, which uses the Eq type
