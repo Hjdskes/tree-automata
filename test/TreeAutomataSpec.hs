@@ -401,6 +401,7 @@ spec = do
       determinize (widen' cons0 cons1) `shouldBeLiteral` cons01
       determinize (widen' cons1 cons2) `shouldBeLiteral` cons12
       determinize (widen' arith0 arith1) `shouldBeLiteral` arith01
+      widen' arith2 arith3 `shouldBeLiteral` arith3
 
     it "should not widen if the LHS is an upper bound" $ do
       widen cons0 cons1 `shouldBeLiteral` cons0
@@ -508,6 +509,11 @@ spec = do
                                        , ("T5", [ Ctor "cst" [], Ctor "par" ["Ty"], Ctor "var" [] ])
                                        , ("T6", [ Ctor "one" [], Ctor "Mul" ["T6","T7"] ])
                                        , ("T7", [ Ctor "cst" [], Ctor "par" ["T3"], Ctor "var" [] ])]
+    arith2 :: GrammarBuilder Text
+    arith2 = grammar "T0" $ M.fromList [ ("T0", [ Ctor "cst" [], Ctor "var" [] ]) ]
+    arith3 :: GrammarBuilder Text
+    arith3 = grammar "Tn" $ M.fromList [ ("Tn", [ Ctor "cst" [], Ctor "par" ["Tx"], Ctor "var" [] ])
+                                       , ("Tx", [ Ctor "zero" [] ]) ]
     arith01 :: GrammarBuilder Text
     arith01 = grammar "Nt0" $ M.fromList [ ("Nt0", [ Ctor "zero" [], Ctor "Add" ["Nt0","Nt1"] ])
                                          , ("Nt1", [ Ctor "one" [], Ctor "Mul" ["Nt1","Nt2"] ])
