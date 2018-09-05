@@ -29,6 +29,7 @@ module TreeAutomata
   , fromSubterms
   , determinize
   , widen
+  , widen'
   , replaceNonterm
   , topologicalClashes
   , wideningClashes
@@ -323,16 +324,15 @@ determinize g | isEmpty g = g
    fromCtor (Ctor c ns) = (c,[ns])
    fromCtor _ = error "epsilon"
 
-widen :: Ord a => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
-widen g1 g2 = {-if g2 `subsetOf` g1 then trace "subset" $ g1 else-} trace "widening" $ widen' g1 (g1 `union` g2) where
-  -- TODO: might not be necessary, but better have it for now.
-  g1' = determinize (normalize (epsilonClosure g1))
-  g2' = determinize (normalize (epsilonClosure g2))
+widen :: (Show a, Ord a) => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
+widen g1 g2 | g2 `subsetOf` g1 = g1
+            | otherwise = determinize (widen' g1 (union g1 g2))
 
-widen' :: Ord a => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
+widen' :: (Show a, Ord a) => GrammarBuilder a -> GrammarBuilder a -> GrammarBuilder a
 widen' g1 g2 = do
-  g1' <- g1
-  g2' <- g2
+  g1' <- determinize (normalize (epsilonClosure g1))
+  g2' <- determinize (normalize (epsilonClosure g2))
+  traceM ("widening on " ++ show g1' ++ " and " ++ show g2')
   let correspondence = correspondenceSet g1' g2'
       topoClashes = topologicalClashes correspondence g1' g2'
       wideClashes = wideningClashes topoClashes g1' g2'
@@ -341,17 +341,16 @@ widen' g1 g2 = do
     then g2 -- TODO: replace nodes?
     else do
     -- TODO: find best arc replacement
-      let (n,a) = Set.elemAt 0 arcs
-      widen' g1 (replaceNonterm n a g2)
+    let (n,a) = Set.elemAt 0 arcs
+    --widen g1 (replaceNonterm n a g2)
+    trace ("Replacing " ++ show n ++ " with " ++ show a ++ " in " ++ show g2') $ return $ replaceNonterm n a g2'
 
-replaceNonterm :: Nonterm -> Nonterm -> GrammarBuilder a -> GrammarBuilder a
-replaceNonterm n a g = do
-  Grammar s ps <- g
-  let ps' = Map.map (map (replace n a)) (Map.delete n ps)
-      replace n a rhs = case rhs of
-        Ctor c ts -> Ctor c (map (\m -> if m == n then a else m) ts)
-        Eps e     -> if e == n then Eps a else Eps e
-  if s == n then grammar a ps' else grammar s ps'
+replaceNonterm :: Nonterm -> Nonterm -> Grammar a -> Grammar a
+replaceNonterm n a (Grammar s ps) = if s == n then Grammar a ps' else Grammar s ps' where
+  ps' = Map.map (map (replace n a)) (Map.delete n ps)
+  replace n a rhs = case rhs of
+    Ctor c ts -> Ctor c (map (\m -> if m == n then a else m) ts)
+    Eps e     -> if e == n then Eps a else Eps e
 
 arcReplacements :: Ord a => Set (Nonterm,Nonterm) -> Grammar a -> Grammar a -> Set (Nonterm,Nonterm)
 arcReplacements wideClashes g1 g2 = Set.map (\(n,n',ancs) -> (n', case bestAncestor n n' ancs g1 g2 of
@@ -369,13 +368,12 @@ bestAncestor n n' ancs g1 g2 = let
   -- Based on nothing but gut feeling.
   (_,a) = minimum $ map (\a -> (e - depth a g2,a)) ancs
   -- Now test whether the found ancestor is a valid ancestor.
-  in if depth n g1 >= depth a g2 -- && overapproximates n' a (productions g2)
+  in if depth n g1 >= depth a g2 && overapproximates n' a (productions g2)
      then Just a
      else bestAncestor n n' (delete a ancs) g1 g2
 
 overapproximates :: Ord a => Nonterm -> Nonterm -> ProdMap a -> Bool
--- TODO: subsetOf already checks for equility, but better be sure for now.
-overapproximates n a ps = nontermGrammar `subsetOf` ancestorGrammar || nontermGrammar == ancestorGrammar where
+overapproximates n a ps = nontermGrammar `subsetOf` ancestorGrammar where
   ancestorGrammar = grammar a ps
   nontermGrammar = grammar n ps
 
@@ -397,16 +395,17 @@ topologicalClashes :: Ord a => Set (Nonterm,Nonterm) -> Grammar a -> Grammar a -
 topologicalClashes correspondence g1 g2 =
   Set.filter (\(n,n') -> prlb n g1 /= prlb n' g2 || depth n g1 /= depth n' g2) correspondence
 
+-- | Requires an epsilon closured grammar.
 correspondenceSet :: Ord a => Grammar a -> Grammar a -> Set (Nonterm,Nonterm)
 correspondenceSet g1@(Grammar s ps) g2@(Grammar s' ps') = execState (go (Set.singleton (s,s')) ps ps') (Set.singleton (s,s')) where
   go :: Ord a => Set (Nonterm,Nonterm) -> ProdMap a -> ProdMap a -> State (Set (Nonterm,Nonterm)) ()
   go worklist ps ps' = if Set.null worklist then return ()
     else do
-      correspondence <- get
       let (n,n') = Set.elemAt 0 worklist
           worklist' = Set.deleteAt 0 worklist
       if depth n g1 == depth n' g2 && prlb n g1 == prlb n' g2
         then do
+          correspondence <- get
           -- TODO: this assumes the same order of right hand sides when zipping.
           let toAdd = zip (children (ps Map.! n)) (children (ps' Map.! n'))
               worklist'' = Set.union worklist' (Set.fromList toAdd Set.\\ correspondence)

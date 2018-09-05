@@ -280,28 +280,38 @@ spec = do
 
   describe "Widening" $ do
     it "should build a correspondence set" $ do
-      -- let cons0' = evalState cons0 0
-      --     cons1' = evalState cons1 0
-      --     cons01' = union cons0 cons1
-      -- correspondenceSet (evalState pcf_sub 0) (evalState pcf 0) `shouldBe` S.fromList [("PSStart","PStart"), ("Type", "Type")]
-      correspondenceSet (evalState cons0 0) (evalState cons1 0) `shouldBe` S.fromList [("T0","T3"),("T1","T4"),("T2","T5")]
+      let cons0' = evalState (epsilonClosure cons0) 0
+          cons1' = evalState (epsilonClosure cons1) 0
+          pcf_sub' = evalState (epsilonClosure pcf_sub) 0
+          pcf' = evalState (epsilonClosure pcf) 0
+      correspondenceSet cons0' cons1' `shouldBe` S.fromList [("T0","T3"),("T1","T4"),("T2","T5")]
+      correspondenceSet pcf_sub' pcf' `shouldBe` S.fromList [("PSStart","PStart")]
 
     it "should find a set of topological clashes" $ do
-      let cons0' = evalState cons0 0
-          cons1' = evalState cons1 0
-          corr = correspondenceSet cons0' cons1'
-      topologicalClashes corr cons0' cons1' `shouldBe` S.fromList [("T2","T5")]
+      let cons0' = evalState (epsilonClosure cons0) 0
+          cons1' = evalState (epsilonClosure cons1) 0
+          corr01 = correspondenceSet cons0' cons1'
+          pcf_sub' = evalState (epsilonClosure pcf_sub) 0
+          pcf' = evalState (epsilonClosure pcf) 0
+          corr_pcf = correspondenceSet pcf_sub' pcf'
+      topologicalClashes corr01 cons0' cons1' `shouldBe` S.fromList [("T2","T5")]
+      topologicalClashes corr_pcf pcf_sub' pcf' `shouldBe` S.fromList [("PSStart","PStart")]
 
     it "should find a set of widening topological clashes" $ do
-      let cons0' = evalState cons0 0
-          cons1' = evalState cons1 0
-          corr = correspondenceSet cons0' cons1'
-          clashes = topologicalClashes corr cons0' cons1'
-      wideningClashes clashes cons0' cons1' `shouldBe` S.fromList [("T2","T5")]
+      let cons0' = evalState (epsilonClosure cons0) 0
+          cons1' = evalState (epsilonClosure cons1) 0
+          corr01 = correspondenceSet cons0' cons1'
+          pcf_sub' = evalState (epsilonClosure pcf_sub) 0
+          pcf' = evalState (epsilonClosure pcf) 0
+          corr_pcf = correspondenceSet pcf_sub' pcf'
+          clashes01 = topologicalClashes corr01 cons0' cons1'
+          clashes_pcf = topologicalClashes corr_pcf pcf_sub' pcf'
+      wideningClashes clashes01 cons0' cons1' `shouldBe` S.fromList [("T2","T5")]
+      wideningClashes clashes_pcf pcf_sub' pcf' `shouldBe` S.fromList [("PSStart","PStart")]
 
     it "should find ancestors" $ do
       findAncestors "T5" (evalState cons1 0) `shouldBe` ["T3"]
-      -- findAncestors "PStart" (evalState pcf 0) `shouldBe` []
+      findAncestors "PStart" (evalState pcf 0) `shouldBe` []
       -- findAncestors "Exp" (evalState pcf 0) `shouldBe` ["PStart"]
       -- findAncestors "String" (evalState pcf 0) `shouldBe` ["Exp","PStart"]
       -- findAncestors "Type" (evalState pcf 0) `shouldBe` ["Exp","PStart"]
@@ -311,10 +321,14 @@ spec = do
       -- findAncestors "A" (evalState cons1 0) `shouldBe` ["F", "G", "H", "S"]
 
     it "should find the best ancestor" $ do
-      let cons0' = evalState cons0 0
-          cons1' = evalState cons1 0
-          ancs = findAncestors "T5" cons1'
-      bestAncestor "T2" "T5" ancs cons0' cons1' `shouldBe` Just "T3"
+      let cons0' = evalState (epsilonClosure cons0) 0
+          cons1' = evalState (epsilonClosure cons1) 0
+          ancs01 = findAncestors "T5" cons1'
+          pcf_sub' = evalState (epsilonClosure pcf_sub) 0
+          pcf' = evalState (epsilonClosure pcf) 0
+          ancs_pcf = findAncestors "PStart" pcf'
+      bestAncestor "T2" "T5" ancs01 cons0' cons1' `shouldBe` Just "T3"
+      bestAncestor "PSStart" "PStart" ancs_pcf pcf_sub' pcf' `shouldBe` Nothing
       -- bestAncestor "PStart" "PStart" (findAncestors "PStart" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Nothing
       -- bestAncestor "Exp" "Exp" (findAncestors "Exp" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Just "PStart"
       -- bestAncestor "String" "String" (findAncestors "String" (evalState pcf 0)) (evalState pcf 0) (evalState pcf 0) `shouldBe` Just "Exp"
@@ -323,12 +337,18 @@ spec = do
       -- bestAncestor "A" "A" (findAncestors "A" (evalState nondet' 0)) (evalState nondet' 0) (evalState nondet' 0) `shouldBe` Just "G"
 
     it "should find a set of arc replacements for the widening topological clashes" $ do
-      let cons0' = evalState cons0 0
-          cons1' = evalState cons1 0
-          corr = correspondenceSet cons0' cons1'
-          topoClashes = topologicalClashes corr cons0' cons1'
-          wideClashes = wideningClashes topoClashes cons0' cons1'
-      arcReplacements wideClashes cons0' cons1' `shouldBe` S.fromList [("T5","T3")]
+      let cons0' = evalState (epsilonClosure cons0) 0
+          cons1' = evalState (epsilonClosure cons1) 0
+          pcf_sub' = evalState (epsilonClosure pcf_sub) 0
+          pcf' = evalState (epsilonClosure pcf) 0
+          corr01 = correspondenceSet cons0' cons1'
+          corr_pcf = correspondenceSet pcf_sub' pcf'
+          topoClashes01 = topologicalClashes corr01 cons0' cons1'
+          topoClashes_pcf = topologicalClashes corr_pcf pcf_sub' pcf'
+          wideClashes01 = wideningClashes topoClashes01 cons0' cons1'
+          wideClashes_pcf = wideningClashes topoClashes_pcf pcf_sub' pcf'
+      arcReplacements wideClashes01 cons0' cons1' `shouldBe` S.fromList [("T5","T3")]
+      arcReplacements wideClashes_pcf pcf_sub' pcf' `shouldBe` S.fromList []
 
     it "should replace nonterminals with ancestors" $ do
       let consr :: GrammarBuilder Text
@@ -336,7 +356,8 @@ spec = do
                                             , ("T4", [ Ctor "any" [] ])
                                             , ("T6", [ Ctor "any" [] ])
                                             , ("T7", [ Ctor "nil" [] ])]
-      replaceNonterm "T5" "T3" cons1 `shouldBeLiteral` consr
+          cons1' = evalState (epsilonClosure cons1) 0
+      return (replaceNonterm "T5" "T3" cons1') `shouldBeLiteral` consr
 
     it "the principal label set" $ do
       prlb "PStart" (evalState pcf 0) `shouldBe` S.empty
@@ -356,10 +377,11 @@ spec = do
       depth "Type" (evalState pcf 0) `shouldBe` 1
       depth "G" (evalState nondet' 0) `shouldBe` 2
       depth "A" (evalState nondet' 0) `shouldBe` 3
+      depth "PSStart" (evalState pcf_sub 0) `shouldBe` 0
 
     it "should work on the example from the paper" $ do
-      widen cons0 cons1 `shouldBeLiteral` cons01
-      -- widen cons1 cons2 `shouldBeLiteral` cons12
+      determinize (widen' cons0 cons1) `shouldBeLiteral` cons01
+      determinize (widen' cons1 cons2) `shouldBeLiteral` cons12
 
     -- it "should not widen if the LHS is an upper bound" $ do
     --   widen pcf pcf_sub `shouldBeLiteral` pcf
@@ -429,18 +451,22 @@ spec = do
                                       , ("T5", [ Ctor "nil" [], Ctor "cons" ["T6","T7"] ])
                                       , ("T6", [ Ctor "any" [] ])
                                       , ("T7", [ Ctor "nil" [] ])]
-    -- cons2 :: GrammarBuilder Text
-    -- cons2 = grammar "T8" $ M.fromList [ ("T8", [ Ctor "nil" [], Ctor "cons" ["T9","T10"] ])
-    --                                   , ("T9", [ Ctor "any" [] ])
-    --                                   , ("T10", [ Ctor "nil" [], Ctor "cons" ["T11","T12"] ])
-    --                                   , ("T11", [ Ctor "any" [] ])
-    --                                   , ("T12", [ Ctor "nil" [] ])]
+    cons2 :: GrammarBuilder Text
+    cons2 = grammar "T8" $ M.fromList [ ("T8", [ Ctor "nil" [], Ctor "cons" ["T9","T10"] ])
+                                      , ("T9", [ Ctor "any" [] ])
+                                      , ("T10", [ Ctor "nil" [], Ctor "cons" ["T11","T12"] ])
+                                      , ("T11", [ Ctor "any" [] ])
+                                      , ("T12", [ Ctor "nil" [], Ctor "cons" ["T13","T14"] ])
+                                      , ("T13", [ Ctor "any" [] ])
+                                      , ("T14", [ Ctor "nil" [] ])]
     cons01 :: GrammarBuilder Text
-    cons01 = grammar "T0" $ M.fromList [ ("T0", [ Ctor "nil" [], Ctor "cons" ["T1", "T0"] ])
-                                       , ("T1", [ Ctor "any" [] ])]
-    -- cons12 :: GrammarBuilder Text
-    -- cons12 = grammar "Tr" $ M.fromList [ ("Tr", [ Ctor "nil" [], Ctor "cons" ["Tx", "Tr"] ])
-    --                                    , ("Tx", [ Ctor "any" [] ])]
+    cons01 = grammar "Nt0" $ M.fromList [ ("Nt0", [ Ctor "nil" [], Ctor "cons" ["Nt1", "Nt0"] ])
+                                        , ("Nt1", [ Ctor "any" [] ])]
+    cons12 :: GrammarBuilder Text
+    cons12 = grammar "Nt0" $ M.fromList [ ("Nt0", [ Ctor "nil" [], Ctor "cons" ["Nt1", "Nt2"] ])
+                                        , ("Nt1", [ Ctor "any" [] ])
+                                        , ("Nt2", [ Ctor "nil" [], Ctor "cons" ["Nt3", "Nt2"] ])
+                                        , ("Nt3", [ Ctor "any" [] ])]
 
     -- Because equality is implemented using inclusion, we cannot test
     -- these functions by using `shouldBe`, which uses the Eq type
